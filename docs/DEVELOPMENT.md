@@ -49,7 +49,7 @@ SQLite 开启 WAL、外键与 busy timeout，schema 版本目前为 1。当前�
 
 Worker 定期续租；120 秒没有有效心跳的运行任务会在下一次 claim 时恢复，达到尝试上限则失败。每个任务在单独进程运行，取消／总超时会停止子进程树。同一节目同类型任务去重，下载和转写互斥；不同下载模式的重复请求明确报 409。
 
-媒体输出按每次尝试隔离，成功时在同一数据库事务中提交路径、文稿和任务结果。旧 Worker 不能提交过期结果。单独下载音频会保留以前缓存的 MP4。
+媒体输出按每次尝试隔离，成功时在同一数据库事务中提交路径、文稿和任务结果。旧 Worker 不能提交过期结果。单独下载音频会保留以前缓存的 MP4。AAC 使用 stream copy 保留压缩音频包；非 AAC 才单线程转换为 AAC 96 kbps，任务结果记录 `audio_processing`。
 
 ## 测试
 
@@ -60,7 +60,7 @@ node --check app/web/app.js
 docker compose --env-file .env.example config --quiet
 ```
 
-测试使用临时数据库与模拟 YouTube 传输，验证鉴权、CORS、请求大小、URL 白名单、签名、Range、反馈排序、模式冲突、并发去重、租约恢复、旧 Worker 隔离、转写／下载互斥与文稿处理。媒体集成测试调用真实 FFmpeg／ffprobe 和合成媒体，分别验证 MP4 模式与仅含 AAC 音频轨道的 M4A，并验证单独下载音频不会清除旧视频。
+测试使用临时数据库与模拟 YouTube 传输，验证鉴权、CORS、请求大小、URL 白名单、签名、Range、反馈排序、模式冲突、并发去重、租约恢复、旧 Worker 隔离、转写／下载互斥与文稿处理。媒体集成测试调用真实 FFmpeg／ffprobe 和合成媒体，验证 MP4、AAC 直接复制、Opus 转 AAC 与已有视频保留；AAC 复制前后的逐包 SHA-256 对比用于确认没有重新编码。
 
 缺少 FFmpeg／ffprobe 时对应测试跳过。真实 YouTube 搜索与下载、服务器 IP 限制、可选 Whisper 的模型下载与效果需要在部署环境验收。可选转写并未包含模型性能基准。
 

@@ -134,9 +134,18 @@ def download(db, job, pulse):
                 raise MediaError("音频轨道超过配置的大小限制")
         else:
             raise MediaError("不支持的下载模式")
-        pulse(81, "生成纯音频")
-        run_command(["ffmpeg", "-nostdin", "-y", "-i", str(audio_source), "-vn", "-c:a", "aac",
-                     "-b:a", "96k", "-movflags", "+faststart", str(work / "audio.m4a")], work, pulse, timeout, 81, 87)
+        probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a:0",
+                                "-show_entries", "stream=codec_name", "-of", "json", str(audio_source)],
+                               capture_output=True, timeout=30, check=True)
+        audio_streams = json.loads(probe.stdout).get("streams", [])
+        if not audio_streams:
+            raise MediaError("下载结果没有可用音轨")
+        copy_audio = audio_streams[0].get("codec_name") == "aac"
+        audio_processing = "stream_copy" if copy_audio else "transcoded"
+        pulse(81, "保存原始 AAC 音轨" if copy_audio else "转换为兼容音频（单线程）")
+        codec_args = ["-c:a", "copy"] if copy_audio else ["-c:a", "aac", "-b:a", "96k", "-threads", "1"]
+        run_command(["ffmpeg", "-nostdin", "-y", "-i", str(audio_source), "-map", "0:a:0", "-vn",
+                     *codec_args, "-movflags", "+faststart", str(work / "audio.m4a")], work, pulse, timeout, 81, 87)
         pulse(88, "获取字幕文稿")
         transcript, warning = None, None
         language = episode["language"]
@@ -187,7 +196,8 @@ def download(db, job, pulse):
             updates["video_file"] = str((destination / "video.mp4").relative_to(settings.data_dir))
         if transcript:
             updates["transcript_source"] = transcript["source"]
-        return {"mode": mode, "video_available": mode == "video" or bool(episode["video_file"]), "audio_available": True, "transcript_available": bool(transcript) or episode["transcript_source"] != "none",
+        return {"mode": mode, "audio_processing": audio_processing,
+                "video_available": mode == "video" or bool(episode["video_file"]), "audio_available": True, "transcript_available": bool(transcript) or episode["transcript_source"] != "none",
                 "warning": warning}, updates, transcript
 
 

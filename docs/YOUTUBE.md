@@ -78,7 +78,9 @@ curl --fail-with-body "$BASE/api/v1/recommendations?language=en&context=gym&minu
 
 ## 四、下载选中视频的音频部分
 
-**默认 mode=audio，只下载独立音轨，输出 M4A（AAC 96 kbps）**。不会先下载完整 MP4。yt-dlp 优先选择 M4A 音轨，否则尝试其他独立音频格式，再由 FFmpeg 转换为兼容的 M4A。如果无独立音频格式，会明确失败，不偷偷回退整视频。
+**默认 mode=audio，只下载独立音轨，输出 M4A**。yt-dlp 优先选择 M4A 音轨。检测到 AAC 时，FFmpeg 直接复制压缩后的音频包，保留原码率，不重新编码；其他编码才单线程转换为 AAC 96 kbps。此模式不会先下载完整 MP4。如果无独立音频格式，会明确失败，不回退整视频。
+
+任务结果 `audio_processing=stream_copy` 表明直接复制；`transcoded` 表明发生了兼容性转换。FFmpeg 的 [stream copy](https://ffmpeg.org/ffmpeg.html#Streamcopy) 不经过解码与重新编码，计算开销较低。标题和已有字幕的获取不使用本地语音模型；YouTube 的自动字幕也已经由平台生成，本应用只获取现成文字。
 
 网页：对推荐点“准备收听” → 等待音频任务完成 → “开始收听”或“音频 ↓”。也可以在“导入视频”粘贴链接，下载内容选“仅音频 + 文稿”。
 

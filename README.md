@@ -41,7 +41,7 @@ Google API 负责公开内容检索与元数据；推荐在本应用中排序；
 
 - 兴趣、频道、显式反馈、时长和每日探索组成的可解释推荐，附推荐理由。
 - 中英文分区、待听列表、继续收听、倍速、睡眠定时、逐句循环。
-- 默认 `mode=audio` 获取独立音轨，输出 AAC 96 kbps M4A；`mode=video` 额外准备移动端兼容 MP4。
+- 默认 `mode=audio` 获取独立音轨；AAC 直接复制为 M4A，保留原码率，其他编码才单线程转换为 AAC 96 kbps；`mode=video` 额外准备 MP4。
 - 相应语言人工字幕优先，其次自动字幕；支持时间戳 JSON 导入和 VTT／TXT 导出。
 - 可选 faster-whisper CPU 转写，不因缺字幕而自动运行。
 - SQLite 持久化任务，去重、退避重试、取消、Worker 租约恢复、媒体任务互斥。
@@ -65,3 +65,5 @@ Google API 负责公开内容检索与元数据；推荐在本应用中排序；
 只处理你有权下载、保存和转写的内容。服务器 IP、地区限制、登录要求或 YouTube 变动可能影响下载；当前不读取 Cookie、不自动绕过访问验证。
 
 项目不会提交 `.env`、数据库、Cookie、媒体文件或虚拟环境。运行数据保存在 Docker 命名卷；`docker compose down` 保留数据，避免误用 `down -v`。
+
+只需标题、已有字幕和音频时，保持仅音频模式、一个 Worker、`EARSPACE_WHISPER_ENABLED=false`。这条路径以网络和存储开销为主，不需要 GPU 或本地语音模型。低配置运行建议见 [部署文档](docs/DEPLOYMENT.md#低配置服务器)。

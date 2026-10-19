@@ -76,7 +76,8 @@ def test_media_pipeline_with_real_ffmpeg(db, seed, tmp_path, monkeypatch):
 
 @pytest.mark.skipif(not shutil.which("ffmpeg") or not shutil.which("ffprobe"), reason="Requires FFmpeg")
 @pytest.mark.parametrize("existing_video", [False, True])
-def test_audio_only_download_uses_audio_track_and_preserves_video(db, seed, tmp_path, monkeypatch, existing_video):
+@pytest.mark.parametrize("input_codec", ["aac", "libopus"])
+def test_audio_only_download_uses_audio_track_and_preserves_video(db, seed, tmp_path, monkeypatch, existing_video, input_codec):
     from app import media
     video_id = seed()
     previous_video = None
@@ -87,9 +88,10 @@ def test_audio_only_download_uses_audio_track_and_preserves_video(db, seed, tmp_
         path.write_bytes(b"existing cached video")
         with db.connect() as c:
             c.execute("UPDATE episodes SET video_file=? WHERE id=?", (previous_video, video_id))
-    fixture = tmp_path / "fixture.m4a"
+    extension = ".m4a" if input_codec == "aac" else ".webm"
+    fixture = tmp_path / ("fixture" + extension)
     subprocess.run(["ffmpeg", "-nostdin", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
-                    "-c:a", "aac", str(fixture)], capture_output=True, check=True, timeout=30)
+                    "-c:a", input_codec, str(fixture)], capture_output=True, check=True, timeout=30)
     real_run, downloads = media.run_command, []
     def transport(command, directory, pulse, timeout, *args):
         directory = Path(directory)
@@ -101,7 +103,7 @@ def test_audio_only_download_uses_audio_track_and_preserves_video(db, seed, tmp_
             downloads.append(command)
             assert command[command.index("-f")+1] == "ba[ext=m4a]/ba"
             assert "--merge-output-format" not in command
-            shutil.copy(fixture, directory / "source_audio.m4a")
+            shutil.copy(fixture, directory / ("source_audio" + extension))
     monkeypatch.setattr(media, "run_command", transport)
     enqueue(db, "download", video_id, {"mode": "audio"})
     job = claim(db, "audio-test")
@@ -119,3 +121,12 @@ def test_audio_only_download_uses_audio_track_and_preserves_video(db, seed, tmp_
                            capture_output=True, check=True, timeout=30)
     streams = json.loads(probe.stdout)["streams"]
     assert len(streams) == 1 and streams[0] == {"codec_name": "aac", "codec_type": "audio"}
+    assert result["audio_processing"] == ("stream_copy" if input_codec == "aac" else "transcoded")
+    if input_codec == "aac":
+        def packet_hashes(path):
+            probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_packets",
+                                    "-show_entries", "packet=data_hash", "-show_data_hash", "sha256", "-of", "json", str(path)],
+                                   capture_output=True, check=True, timeout=30)
+            return [p["data_hash"] for p in json.loads(probe.stdout)["packets"]]
+        # A stream copy preserves the compressed packets, unlike decode/re-encode.
+        assert packet_hashes(fixture) == packet_hashes(audio)

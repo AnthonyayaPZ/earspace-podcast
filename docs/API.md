@@ -55,6 +55,8 @@ curl -X POST "$BASE/api/v1/episodes/import" \
 
 任务响应的 `media_mode` 表明下载模式。导入请求 `mode` 和下载查询参数 `mode` 均默认 `audio`；旧版本没有模式字段的已持久化任务仍按视频模式恢复。同节目不同模式的并发请求返回 409。
 
+成功任务的 `result.audio_processing` 为 `stream_copy`（AAC 直接复制，保留原码率）或 `transcoded`（其他编码以单线程转换为 AAC 96 kbps）。
+
 文稿导入格式（秒）：
 
 ```json
