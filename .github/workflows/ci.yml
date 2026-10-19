@@ -1,0 +1,51 @@
+name: Tests and container smoke test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.lock
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Install FFmpeg and Python dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install -r requirements.lock
+          python -m pip install -e '.[test]'
+      - name: Run backend and media tests
+        run: python -m pytest -q
+      - name: Check browser JavaScript and Compose
+        run: |
+          node --check app/web/app.js
+          python scripts/init_env.py
+          docker compose config --quiet
+      - name: Build and launch container services
+        run: docker compose up -d --build --wait --wait-timeout 180
+      - name: Check authenticated API and Worker heartbeat
+        run: |
+          docker compose exec -T api python -c 'import os,time,json,urllib.request; time.sleep(3); req=urllib.request.Request("http://127.0.0.1:8000/api/v1/status",headers={"Authorization":"Bearer "+os.environ["EARSPACE_API_KEY"]}); data=json.load(urllib.request.urlopen(req,timeout=10)); assert data["workers_online"]>=1,data; assert data["ffmpeg_available"] and data["node_available"],data; print("Container API, worker, FFmpeg and Node are ready")'
+      - name: Container diagnostics
+        if: failure()
+        run: docker compose logs --tail 100
+      - name: Stop test services
+        if: always()
+        run: docker compose down

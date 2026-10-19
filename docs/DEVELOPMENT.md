@@ -1,0 +1,85 @@
+# 开发、架构与验证
+
+## 本机运行
+
+依赖 Python 3.11+、FFmpeg／ffprobe、Node.js 22+；三者可从 PATH 调用。
+
+```bash
+python -m venv .venv
+# Linux/macOS
+source .venv/bin/activate
+# Windows PowerShell 使用 .venv\Scripts\Activate.ps1
+python -m pip install -r requirements.lock
+python -m pip install --no-deps -e .
+python scripts/init_env.py
+```
+
+编辑 `.env`，然后在两个终端分别启动：
+
+```bash
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --no-access-log
+```
+
+```bash
+python -m app.worker
+```
+
+应用从当前项目根目录读取 `.env`，不会覆盖已设置的环境变量。API 不启动内嵌下载线程；务必运行独立 Worker。
+
+## 目录与数据流
+
+| 文件 | 职责 |
+| --- | --- |
+| `app/main.py` | FastAPI 接口、鉴权、同源网页、签名流与 Range 文件 |
+| `app/config.py` | 环境配置与启动校验 |
+| `app/db.py` | SQLite schema、连接与节目记录 |
+| `app/youtube.py` | Google API、搜索／频道发现、查询缓存 |
+| `app/recommend.py` | 可解释排序、反馈与文稿难度估计 |
+| `app/jobs.py` | 入队、租约、重试、取消、所有权隔离 |
+| `app/worker.py` | 队列轮询、任务子进程、心跳与超时控制 |
+| `app/runner.py` | 单个任务执行与结果提交 |
+| `app/media.py` | 音轨／MP4 下载、FFmpeg、字幕、可选 Whisper |
+| `app/transcripts.py` | YouTube JSON3 解析与 VTT 导出 |
+| `app/maintenance.py` | 未引用媒体和工作目录的只读检查／显式清理 |
+| `app/web/` | 无构建的 HTML、CSS 与原生 JavaScript 网页 |
+
+SQLite 开启 WAL、外键与 busy timeout，schema 版本目前为 1。当前模式变化使用任务 payload，不修改已有数据库结构。后续结构调整需显式迁移；升级前备份数据。
+
+新下载请求默认音频模式。任务 payload 的 `mode` 值为 `audio` 或 `video`；没有该字段的旧任务恢复为视频模式以兼容历史行为。`public_job` 返回 `media_mode`，不暴露完整内部 payload 或租约 owner。
+
+Worker 定期续租；120 秒没有有效心跳的运行任务会在下一次 claim 时恢复，达到尝试上限则失败。每个任务在单独进程运行，取消／总超时会停止子进程树。同一节目同类型任务去重，下载和转写互斥；不同下载模式的重复请求明确报 409。
+
+媒体输出按每次尝试隔离，成功时在同一数据库事务中提交路径、文稿和任务结果。旧 Worker 不能提交过期结果。单独下载音频会保留以前缓存的 MP4。
+
+## 测试
+
+```bash
+python -m pip install -e '.[test]'
+python -m pytest -q
+node --check app/web/app.js
+docker compose --env-file .env.example config --quiet
+```
+
+测试使用临时数据库与模拟 YouTube 传输，验证鉴权、CORS、请求大小、URL 白名单、签名、Range、反馈排序、模式冲突、并发去重、租约恢复、旧 Worker 隔离、转写／下载互斥与文稿处理。媒体集成测试调用真实 FFmpeg／ffprobe 和合成媒体，分别验证 MP4 模式与仅含 AAC 音频轨道的 M4A，并验证单独下载音频不会清除旧视频。
+
+缺少 FFmpeg／ffprobe 时对应测试跳过。真实 YouTube 搜索与下载、服务器 IP 限制、可选 Whisper 的模型下载与效果需要在部署环境验收。可选转写并未包含模型性能基准。
+
+GitHub Actions 在 Linux 上跑测试、脚本检查、镜像构建、Compose 启动和鉴权状态探测；不设置真实 YouTube 密钥，不运行真实 YouTube 下载。
+
+## 依赖与发行包
+
+`requirements.lock` 固定基础运行依赖，Docker 按此安装。更新锁文件：
+
+```bash
+uv pip compile --universal pyproject.toml -o requirements.lock
+```
+
+更新后测试并重建镜像，尤其 yt-dlp 需要跟随上游提取机制变化。可选转写依赖由 `.[transcription]` 解析，未单独锁定；Docker 使用 `libgomp1` 支持 CPU 模型运行。
+
+生成包含代码、文档、配置模板和测试的源码包：
+
+```bash
+python scripts/package_release.py
+```
+
+输出 `artifacts/earspace-server.zip`。脚本使用明确的文件／目录范围，排除真实 `.env`、数据库、媒体、虚拟环境及 Git 元数据；运行前仍应检查自定义文档中没有敏感信息。GitHub 上提交源码，不提交本地产生的发行 ZIP。

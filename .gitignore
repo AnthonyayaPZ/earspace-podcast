@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.sqlite3*
+cookies*.txt
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+data/
+*.egg-info/
+build/
+dist/
+artifacts/

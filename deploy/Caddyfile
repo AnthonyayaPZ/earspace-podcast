@@ -1,0 +1,8 @@
+# Optional reverse proxy. Run Caddy on the host and replace the domain.
+podcast.example.com {
+    request_body {
+        max_size 8MB
+    }
+    reverse_proxy 127.0.0.1:8000
+    # Do not enable access logging of signed playback query strings.
+}
