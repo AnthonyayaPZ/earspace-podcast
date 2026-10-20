@@ -6,7 +6,7 @@ root = Path(__file__).resolve().parent.parent
 output = root / "artifacts" / "earspace-server.zip"
 output.parent.mkdir(exist_ok=True)
 files = [root / name for name in (".env.example", ".gitignore", ".gitattributes", ".dockerignore", "Dockerfile",
-                                 "compose.yaml", "pyproject.toml", "requirements.lock", "README.md")]
+                                 "compose.yaml", "pyproject.toml", "uv.lock", ".python-version", "README.md")]
 for directory in ("app", "scripts", "deploy", "tests", "docs", ".github"):
     path = root / directory
     if path.is_dir():

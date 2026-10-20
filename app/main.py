@@ -102,7 +102,7 @@ def create_app(settings=None):
                 "whisper_enabled": settings.whisper_enabled,
                 "free_disk_mb": shutil.disk_usage(settings.data_dir).free // 1024**2,
                 "active_jobs": active, "last_running_job_heartbeat": row[0],
-                "workers_online": online, "worker_note": "独立启动 python -m app.worker"}
+                "workers_online": online, "worker_note": "独立启动 uv run --locked python -m app.worker"}
 
     @app.get("/api/v1/preferences", dependencies=protected, tags=["preferences"])
     def get_preferences():

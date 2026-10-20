@@ -6,14 +6,33 @@
 
 ![网页预览](docs/web-preview.png)
 
+## 本机测试（uv）
+
+安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)（0.10.4+）、FFmpeg／ffprobe 和 Node.js 22+，在项目根目录执行：
+
+```bash
+uv sync --locked
+uv run --locked scripts/init_env.py
+# 编辑 .env，填写 YOUTUBE_API_KEY；保留 EARSPACE_API_KEY
+uv run --locked uvicorn app.main:app --host 127.0.0.1 --port 8000 --no-access-log
+```
+
+在另一个终端进入同一个目录，运行后台任务服务：
+
+```bash
+uv run --locked python -m app.worker
+```
+
+打开 <http://127.0.0.1:8000/>，输入 `.env` 中的 EARSPACE_API_KEY。两个终端都需保持运行，停止时分别按 Ctrl+C。uv 根据 `.python-version` 使用 Python 3.12，并自动管理 `.venv`，不需要手动激活环境；默认不安装 Whisper。更多命令见 [本机开发](docs/DEVELOPMENT.md)。
+
 ## 快速部署
 
-需要 Linux、Docker Engine + Compose 插件，以及能访问 Google APIs、YouTube 和软件源的服务器。仓库为私有，需要先配置有读取权限的 GitHub SSH Key 或 HTTPS 凭据。
+需要 Linux、Docker Engine + Compose 插件、uv，以及能访问 Google APIs、YouTube 和软件源的服务器。仓库为私有，需要先配置有读取权限的 GitHub SSH Key 或 HTTPS 凭据。宿主机 uv 仅用于初始化配置，容器内使用 `uv.lock` 安装应用。
 
 ```bash
 git clone git@github.com:AnthonyayaPZ/earspace-podcast.git
 cd earspace-podcast
-python3 scripts/init_env.py
+uv run --no-project --python 3.12 scripts/init_env.py
 # 编辑 .env，填写 YOUTUBE_API_KEY；保留生成的 EARSPACE_API_KEY
 docker compose up -d --build --wait --wait-timeout 180
 docker compose logs --tail 100 api worker

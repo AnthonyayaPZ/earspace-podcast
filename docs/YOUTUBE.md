@@ -137,5 +137,5 @@ curl --fail-with-body -X PUT "$BASE/api/v1/episodes/$VIDEO_ID/feedback" \
 - 网络能访问 Google API，不代表服务器 IP 一定能下载 YouTube 媒体；反过来也一样。
 - Google 配额、密钥限制和 API 启用状态会影响发现；YouTube 的登录要求、IP 限制、地区限制和平台变化会影响音轨下载。
 - 当前版本不读取浏览器 Cookie，不自动绕过验证码／登录，也不保证所有公开视频都能下载。
-- yt-dlp 需要维护更新；运行依赖锁定在 requirements.lock，更新后测试并重建镜像。不要关闭 TLS 验证来处理网络错误。
+- yt-dlp 需要维护更新；依赖锁定在 uv.lock，可用 `uv lock --upgrade-package yt-dlp` 更新，测试后重建镜像。不要关闭 TLS 验证来处理网络错误。
 - 只下载、保存、转写自己有权处理的内容。项目的音轨格式选择和工具参数参考 [yt-dlp 官方文档](https://github.com/yt-dlp/yt-dlp#format-selection)。

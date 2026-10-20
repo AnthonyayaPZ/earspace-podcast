@@ -2,29 +2,28 @@
 
 ## 本机运行
 
-依赖 Python 3.11+、FFmpeg／ffprobe、Node.js 22+；三者可从 PATH 调用。
+安装 [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.10.4+、FFmpeg／ffprobe、Node.js 22+；后两者需能从 PATH 调用。项目默认 Python 版本由 `.python-version` 固定为 3.12，uv 会查找或自动安装对应解释器，不依赖系统默认的 Python。
 
 ```bash
-python -m venv .venv
-# Linux/macOS
-source .venv/bin/activate
-# Windows PowerShell 使用 .venv\Scripts\Activate.ps1
-python -m pip install -r requirements.lock
-python -m pip install --no-deps -e .
-python scripts/init_env.py
+uv sync --locked
+uv run --locked scripts/init_env.py
 ```
 
 编辑 `.env`，然后在两个终端分别启动：
 
 ```bash
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --no-access-log
+uv run --locked uvicorn app.main:app --host 127.0.0.1 --port 8000 --no-access-log
 ```
 
 ```bash
-python -m app.worker
+uv run --locked python -m app.worker
 ```
 
-应用从当前项目根目录读取 `.env`，不会覆盖已设置的环境变量。API 不启动内嵌下载线程；务必运行独立 Worker。
+Linux、macOS 和 Windows PowerShell 使用相同的 uv 命令，无需手动激活 `.venv`。应用从当前项目根目录读取 `.env`，不会覆盖已设置的环境变量。API 不启动内嵌下载线程；务必运行独立 Worker。打开 <http://127.0.0.1:8000/> 测试，两个终端分别按 Ctrl+C 停止。
+
+`uv sync --locked` 默认安装基础依赖和 dev 组的测试工具，不安装 Whisper。只需运行服务时可使用 `uv sync --locked --no-dev`，相应启动命令也加 `--no-dev`，例如 `uv run --locked --no-dev python -m app.worker`。
+
+只有需要本地语音转写时，才运行 `uv sync --locked --extra transcription` 并设置 `EARSPACE_WHISPER_ENABLED=true`。此时 API 和 Worker 的 `uv run` 命令都加 `--extra transcription`，例如 `uv run --locked --extra transcription python -m app.worker`。依赖会安装到同一个 `.venv`；模型由首次实际转写另行下载。Docker 根据 `EARSPACE_WHISPER_ENABLED` 构建参数选择同一锁文件中的可选依赖。
 
 ## 目录与数据流
 
@@ -54,8 +53,8 @@ Worker 定期续租；120 秒没有有效心跳的运行任务会在下一次 cl
 ## 测试
 
 ```bash
-python -m pip install -e '.[test]'
-python -m pytest -q
+uv sync --locked
+uv run --locked pytest -q
 node --check app/web/app.js
 docker compose --env-file .env.example config --quiet
 ```
@@ -68,18 +67,23 @@ GitHub Actions 在 Linux 上跑测试、脚本检查、镜像构建、Compose �
 
 ## 依赖与发行包
 
-`requirements.lock` 固定基础运行依赖，Docker 按此安装。更新锁文件：
+`pyproject.toml` 声明基础依赖、`transcription` 可选依赖和 dev 依赖组；`uv.lock` 是唯一的依赖锁文件，覆盖跨平台运行、开发测试与可选转写依赖，并提交到 Git。不要手动编辑锁文件。新增或更新依赖：
 
 ```bash
-uv pip compile --universal pyproject.toml -o requirements.lock
+uv add <package>
+uv add --dev <package>
+uv lock --upgrade-package yt-dlp
+uv sync --locked
 ```
 
-更新后测试并重建镜像，尤其 yt-dlp 需要跟随上游提取机制变化。可选转写依赖由 `.[transcription]` 解析，未单独锁定；Docker 使用 `libgomp1` 支持 CPU 模型运行。
+手动修改 `pyproject.toml` 后运行 `uv lock`。`uv lock --check` 检查锁文件是否匹配；`uv sync --locked` 与 `uv run --locked` 在锁文件过期时直接报错，避免部署时意外解析新版本。更新后测试并重建镜像，尤其 yt-dlp 需要跟随上游提取机制变化。
+
+Docker 与 CI 固定使用 uv 0.10.4；升级 uv 时同时更新 Dockerfile 和 CI 中的版本。镜像分层安装依赖，排除 dev 组，默认排除转写依赖，最终安装为非 editable 项目。运行时通过 PATH 使用 `/app/.venv/bin` 中的 Python 和命令，不在启动时联网同步依赖。Compose 的 Worker、健康检查和维护命令因此仍直接使用 `python`。Docker 使用 `libgomp1` 支持可选 CPU 模型运行。
 
 生成包含代码、文档、配置模板和测试的源码包：
 
 ```bash
-python scripts/package_release.py
+uv run --locked scripts/package_release.py
 ```
 
 输出 `artifacts/earspace-server.zip`。脚本使用明确的文件／目录范围，排除真实 `.env`、数据库、媒体、虚拟环境及 Git 元数据；运行前仍应检查自定义文档中没有敏感信息。GitHub 上提交源码，不提交本地产生的发行 ZIP。

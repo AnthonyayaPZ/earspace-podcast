@@ -1,6 +1,6 @@
 # 服务器部署与运维
 
-推荐 Linux + Docker Engine + Compose 插件。服务由 API 和后台 Worker 组成，SQLite／媒体／模型共用一个持久化数据卷。单用户使用，不需要单独安装数据库或 Node 前端环境。
+推荐 Linux + Docker Engine + Compose 插件。服务由 API 和后台 Worker 组成，SQLite／媒体／模型共用一个持久化数据卷。单用户使用，不需要单独安装数据库或 Node 前端环境。项目依赖由 uv 管理，镜像严格按 `uv.lock` 安装。
 
 ## 1. 从 GitHub 获取代码
 
@@ -25,10 +25,10 @@ cd earspace-podcast
 ```bash
 docker --version
 docker compose version
-python3 --version
+uv --version
 ```
 
-宿主机的 Python 只用来运行初始化脚本；应用在镜像中使用 Python 3.12。只取标题、已有字幕和音轨时不需要 GPU 或本地语音模型。实际 CPU／内存峰值还受 yt-dlp、Node 解析和下载任务影响，尚未测定低配置机器的最低要求。服务器必须能访问 GitHub、镜像仓库、Python 软件源、Google APIs、YouTube 及其媒体域名。
+宿主机安装 [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.10.4+，只用来运行配置初始化脚本；uv 可自动获取 Python 3.12，无需安装宿主机应用依赖。应用在镜像中使用 Python 3.12，构建时使用固定版本 uv。只取标题、已有字幕和音轨时不需要 GPU 或本地语音模型。实际 CPU／内存峰值还受 yt-dlp、Node 解析和下载任务影响，尚未测定低配置机器的最低要求。服务器必须能访问 GitHub、镜像仓库（Docker Hub、GHCR）、Debian 包源、Python 软件源、Google APIs、YouTube 及其媒体域名。
 
 ## 低配置服务器
 
@@ -44,12 +44,12 @@ python3 --version
 ## 2. 初始化并配置密钥
 
 ```bash
-python3 scripts/init_env.py
+uv run --no-project --python 3.12 scripts/init_env.py
 chmod 600 .env
 nano .env
 ```
 
-初始化脚本从 `.env.example` 生成 `.env` 并产生随机 EARSPACE_API_KEY；已有文件不会被覆盖。
+初始化脚本从 `.env.example` 生成 `.env` 并产生随机 EARSPACE_API_KEY；已有文件不会被覆盖。`--no-project` 让这一步只运行标准库脚本，不安装应用依赖；依赖将在镜像构建时由 `uv sync --locked --no-dev` 安装。开发测试依赖和默认关闭的 Whisper 不进入基础镜像。
 
 | 配置 | 用途 | 首次部署 |
 | --- | --- | --- |

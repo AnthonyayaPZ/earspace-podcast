@@ -18,9 +18,13 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.12'
-          cache: pip
-          cache-dependency-path: requirements.lock
+          python-version-file: .python-version
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.10.4'
+          enable-cache: true
+          cache-dependency-glob: uv.lock
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
@@ -29,14 +33,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-          python -m pip install -r requirements.lock
-          python -m pip install -e '.[test]'
+          uv sync --locked
       - name: Run backend and media tests
-        run: python -m pytest -q
+        run: uv run --locked pytest -q
       - name: Check browser JavaScript and Compose
         run: |
           node --check app/web/app.js
-          python scripts/init_env.py
+          uv run --locked scripts/init_env.py
           docker compose config --quiet
       - name: Build and launch container services
         run: docker compose up -d --build --wait --wait-timeout 180

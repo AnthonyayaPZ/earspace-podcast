@@ -71,7 +71,7 @@ async function checkStatus() {
   const status = await api('/status');
   const messages = [];
   if (!status.youtube_discovery_configured) messages.push('服务器尚未配置 YouTube API 密钥，配置后可发现真实推荐。你仍可用链接导入内容。');
-  if (!status.workers_online) messages.push('暂未检测到在线 Worker，请在服务器启动 python -m app.worker。');
+  if (!status.workers_online) messages.push('暂未检测到在线 Worker，请在服务器启动 uv run --locked python -m app.worker。');
   if (!status.ffmpeg_available || !status.ffprobe_available) messages.push('服务器缺少 FFmpeg / ffprobe，媒体处理不可用。');
   notice(messages.join(' '));
 }
