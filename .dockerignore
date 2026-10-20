@@ -1,5 +1,9 @@
 .git
 .env
+.env.*
+secrets
+cookies*.txt
+*.cookies.txt
 .venv
 data
 __pycache__

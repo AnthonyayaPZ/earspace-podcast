@@ -21,7 +21,9 @@ def execute(db, job, owner):
             fail(db, job, owner, "未知任务类型", retry=False)
     except LostLease:
         pass
-    except (MediaError, ProviderError) as exc:
+    except MediaError as exc:
+        fail(db, job, owner, str(exc), retry=exc.retry)
+    except ProviderError as exc:
         fail(db, job, owner, str(exc))
     except Exception:
         # Do not leak provider keys/absolute paths through raw exception strings or tracebacks.

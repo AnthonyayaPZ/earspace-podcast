@@ -55,6 +55,7 @@ nano .env
 | --- | --- | --- |
 | `EARSPACE_API_KEY` | 你访问本应用的密钥，包括网页连接与业务 API | 保留随机生成值 |
 | `YOUTUBE_API_KEY` | 后端调用 Google YouTube Data API 的密钥 | 按 [YouTube 接入文档](YOUTUBE.md) 获取并填写 |
+| `EARSPACE_YOUTUBE_COOKIES_FILE` | 可选 YouTube 登录会话文件路径 | 默认留空；需要时按 [Cookie 配置说明](YOUTUBE.md#六youtube-登录验证与-cookie-文件) 设置 |
 | `EARSPACE_CORS_ORIGINS` | 允许的独立前端来源 | 同源网页可留空；不要填 `*` |
 | `EARSPACE_SEARCH_TTL_SECONDS` | YouTube 查询缓存秒数 | 默认 21600，即 6 小时 |
 | `EARSPACE_JOB_TIMEOUT_SECONDS` | 一次任务的总处理上限 | 默认 7200 秒 |
@@ -143,7 +144,8 @@ docker compose exec api python -m app.maintenance --prune
 | 发现任务 Google API 拒绝 | API 未启用、密钥限制不匹配、配额不足；见 YOUTUBE.md |
 | 任务一直 queued | Worker 没启动、正在处理别的任务，或重试退避；查 `docker compose logs worker` |
 | 任务中途重启 | 租约超时后自动恢复；超过尝试次数后可在网页重新尝试 |
-| YouTube 要求登录／bot 验证 | IP／登录／地区访问限制；当前版本不读取 Cookie、不自动绕过验证 |
+| YouTube 要求登录／bot 验证 | 在浏览器完成验证，按 YOUTUBE.md 配置导出的 Cookie 文件；Docker 使用 compose.cookies.yaml；更新后手动重试 |
+| Cookie 文件读取失败 | Netscape 格式、路径、容器 UID 10001 读取权限；确认使用 Cookie 覆盖文件挂载 |
 | 音频可播但文稿为空 | 没有对应字幕；可导入 JSON 或配置可选转写 |
 | 仅音频任务无独立音轨 | 当前模式不回退为整视频下载；可显式选择 MP4 模式 |
 | `409` 下载模式冲突 | 同节目已有另一种模式的任务，完成或取消后再提交 |

@@ -6,13 +6,16 @@ import subprocess
 import sys
 import tempfile
 import time
+from http.cookiejar import LoadError, MozillaCookieJar
 from pathlib import Path
 
 from .transcripts import parse_json3
 
 
 class MediaError(Exception):
-    pass
+    def __init__(self, message, *, retry=True):
+        super().__init__(message)
+        self.retry = retry
 
 
 def run_command(command, directory, pulse, timeout, progress_start=0, progress_end=100):
@@ -44,8 +47,10 @@ def run_command(command, directory, pulse, timeout, progress_start=0, progress_e
                 log.seek(max(0, log.seek(0, 2) - 4000))
                 diagnostic = log.read().decode("utf-8", errors="replace")
                 # Do not expose raw provider URLs, cookies, server paths or console output.
-                if "Sign in" in diagnostic or "bot" in diagnostic:
-                    message = "YouTube 要求登录或触发访问验证；当前版本不自动绕过验证"
+                if any(marker in diagnostic.lower() for marker in (
+                        "sign in to confirm", "sign in to verify", "login required")):
+                    raise MediaError("YouTube 要求登录或访问验证；请配置或更新 EARSPACE_YOUTUBE_COOKIES_FILE 后手动重试",
+                                     retry=False)
                 elif "Requested format" in diagnostic or "format is not available" in diagnostic:
                     message = "此视频没有可用的兼容媒体格式；请更新 yt-dlp 或选择其他视频"
                 elif "Private video" in diagnostic or "Video unavailable" in diagnostic:
@@ -73,6 +78,33 @@ def base_command():
             "--fragment-retries", "2"]
 
 
+def youtube_command(settings, work):
+    """Use a private per-attempt cookie jar; never update the supplied credential file."""
+    command = base_command()
+    if not settings.youtube_cookies_file:
+        return command
+    try:
+        source = Path(settings.youtube_cookies_file).expanduser()
+        if not source.is_file() or source.stat().st_size > 1024**2:
+            raise ValueError("Missing or oversized cookie file")
+        original = MozillaCookieJar(str(source))
+        original.load(ignore_discard=True, ignore_expires=True)
+        destination = Path(work) / ".youtube-cookies.txt"
+        jar = MozillaCookieJar(str(destination))
+        for cookie in original:
+            domain = cookie.domain.lstrip(".").lower()
+            if domain == "youtube.com" or domain.endswith(".youtube.com"):
+                jar.set_cookie(cookie)
+        if not len(jar):
+            raise ValueError("No YouTube cookies")
+        destination.touch(mode=0o600, exist_ok=False)
+        jar.save(ignore_discard=True, ignore_expires=True)
+    except (OSError, LoadError, UnicodeError, ValueError):
+        raise MediaError("无法读取 YouTube Cookie；请检查 EARSPACE_YOUTUBE_COOKIES_FILE、文件权限和 Netscape 格式",
+                         retry=False) from None
+    return command + ["--cookies", str(destination)]
+
+
 def download(db, job, pulse):
     settings = db.settings
     episode = db.episode(job["episode_id"])
@@ -83,12 +115,13 @@ def download(db, job, pulse):
     work_root = settings.data_dir / "work"
     work_root.mkdir(exist_ok=True)
     # Separate attempts use unique directories, including after a lease recovery.
-    with tempfile.TemporaryDirectory(prefix=job["id"] + "-", dir=work_root) as working:
+    with tempfile.TemporaryDirectory(prefix=f"{job['id']}-{job['attempts']}-", dir=work_root) as working:
         work = Path(working)
+        command = youtube_command(settings, work)
         url = f"https://www.youtube.com/watch?v={episode['id']}"
         timeout = settings.job_timeout
         pulse(2, "读取视频信息")
-        run_command(base_command() + ["--skip-download", "--write-info-json", "-o", "source.%(ext)s", url],
+        run_command(command + ["--skip-download", "--write-info-json", "-o", "source.%(ext)s", url],
                     work, pulse, min(timeout, 180), 2, 5)
         info = json.loads((work / "source.info.json").read_text(encoding="utf-8"))
         duration = info.get("duration") or 0
@@ -97,7 +130,7 @@ def download(db, job, pulse):
         mode = json.loads(job.get("payload") or "{}").get("mode", "video")
         if mode == "video":
             pulse(5, "下载并合并 MP4")
-            run_command(base_command() + [
+            run_command(command + [
                 "--newline", "--progress", "--max-filesize", f"{settings.max_file_mb}M",
                 "-f", "bv[vcodec^=avc1][height<=720]+ba[ext=m4a]/b[ext=mp4]/bv[height<=720]+ba/b",
                 "--merge-output-format", "mp4", "--remux-video", "mp4",
@@ -122,7 +155,7 @@ def download(db, job, pulse):
             audio_source = work / "ready.mp4"
         elif mode == "audio":
             pulse(5, "下载音频轨道")
-            run_command(base_command() + ["--newline", "--progress", "--max-filesize", f"{settings.max_file_mb}M",
+            run_command(command + ["--newline", "--progress", "--max-filesize", f"{settings.max_file_mb}M",
                         "-f", "ba[ext=m4a]/ba", "-o", "source_audio.%(ext)s", url],
                         work, pulse, timeout, 5, 80)
             candidates = [path for path in work.glob("source_audio.*")
@@ -157,7 +190,7 @@ def download(db, job, pulse):
         selected = (manual_langs or auto_langs or [None])[0]
         if selected:
             try:
-                run_command(base_command() + ["--skip-download", "--write-subs" if manual_langs else "--write-auto-subs",
+                run_command(command + ["--skip-download", "--write-subs" if manual_langs else "--write-auto-subs",
                             "--sub-langs", selected, "--sub-format", "json3", "-o", "caption.%(ext)s", url],
                             work, pulse, min(timeout, 300), 88, 95)
                 files = list(work.glob("caption.*.json3"))

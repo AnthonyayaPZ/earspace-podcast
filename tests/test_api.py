@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import time
+from dataclasses import replace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -16,6 +17,14 @@ def test_health_and_auth(client):
     assert client.get("/api/v1/preferences", headers={"Authorization": "Bearer invalid"}).status_code == 401
     assert client.get("/api/v1/preferences").status_code == 200
     assert client.get("/openapi.json").json()["components"]["securitySchemes"]["HTTPBearer"]
+
+
+def test_cookie_status_never_exposes_credential_path(settings):
+    path = "/private/server/youtube.cookies.txt"
+    with TestClient(create_app(replace(settings, youtube_cookies_file=path))) as client:
+        response = client.get("/api/v1/status", headers={"Authorization": f"Bearer {settings.api_key}"})
+    assert response.json()["youtube_cookies_configured"] is True
+    assert path not in response.text
 
 
 def test_web_test_client_is_served(client):

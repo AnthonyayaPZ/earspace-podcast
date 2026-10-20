@@ -12,6 +12,7 @@ class Settings:
     data_dir: Path = field(default_factory=lambda: Path(os.getenv("EARSPACE_DATA_DIR", "data")).resolve())
     api_key: str = field(default_factory=lambda: os.getenv("EARSPACE_API_KEY", ""))
     youtube_key: str = field(default_factory=lambda: os.getenv("YOUTUBE_API_KEY", ""))
+    youtube_cookies_file: str = field(default_factory=lambda: os.getenv("EARSPACE_YOUTUBE_COOKIES_FILE", "").strip())
     cors_origins: tuple[str, ...] = field(default_factory=lambda: tuple(
         s.strip() for s in os.getenv("EARSPACE_CORS_ORIGINS", "").split(",") if s.strip()))
     search_ttl: int = field(default_factory=lambda: int(os.getenv("EARSPACE_SEARCH_TTL_SECONDS", "21600")))

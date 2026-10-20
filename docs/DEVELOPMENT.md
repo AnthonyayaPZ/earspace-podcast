@@ -48,6 +48,8 @@ SQLite 开启 WAL、外键与 busy timeout，schema 版本目前为 1。当前�
 
 Worker 定期续租；120 秒没有有效心跳的运行任务会在下一次 claim 时恢复，达到尝试上限则失败。每个任务在单独进程运行，取消／总超时会停止子进程树。同一节目同类型任务去重，下载和转写互斥；不同下载模式的重复请求明确报 409。
 
+可选 Cookie 文件通过 `EARSPACE_YOUTUBE_COOKIES_FILE` 指定。下载子进程从 Netscape 文件中过滤 YouTube 域名 Cookie，将其写入每次任务的临时私有文件；所有 yt-dlp 调用复用该副本。源文件不写入，文件路径与 Cookie 不进入 API 返回或媒体发布目录。明确登录验证和 Cookie 配置错误不自动重试；临时网络错误仍按队列策略重试。配置与 Docker 只读挂载见 [YouTube 接入](YOUTUBE.md#六youtube-登录验证与-cookie-文件)。
+
 媒体输出按每次尝试隔离，成功时在同一数据库事务中提交路径、文稿和任务结果。旧 Worker 不能提交过期结果。单独下载音频会保留以前缓存的 MP4。AAC 使用 stream copy 保留压缩音频包；非 AAC 才单线程转换为 AAC 96 kbps，任务结果记录 `audio_processing`。
 
 ## 测试

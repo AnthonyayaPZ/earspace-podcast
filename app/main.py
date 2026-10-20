@@ -96,6 +96,7 @@ def create_app(settings=None):
             active = c.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('queued','running')").fetchone()[0]
             online = c.execute("SELECT COUNT(*) FROM workers WHERE heartbeat>?", (time.time()-60,)).fetchone()[0]
         return {"youtube_discovery_configured": bool(settings.youtube_key),
+                "youtube_cookies_configured": bool(settings.youtube_cookies_file),
                 "ffmpeg_available": bool(shutil.which("ffmpeg")),
                 "ffprobe_available": bool(shutil.which("ffprobe")),
                 "node_available": bool(shutil.which("node")),

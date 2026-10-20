@@ -3,12 +3,14 @@ import shutil
 import subprocess
 import sys
 import time
+from dataclasses import replace
+from http.cookiejar import MozillaCookieJar
 from pathlib import Path
 
 import pytest
 
 from app.jobs import LostLease, claim, enqueue, finish
-from app.media import MediaError, download, run_command
+from app.media import MediaError, download, run_command, youtube_command
 from app.transcripts import parse_json3
 
 
@@ -36,9 +38,16 @@ def test_subprocess_timeout_and_cancellation(tmp_path):
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg") or not shutil.which("ffprobe"), reason="Requires FFmpeg")
-def test_media_pipeline_with_real_ffmpeg(db, seed, tmp_path, monkeypatch):
+@pytest.mark.parametrize("with_cookies", [False, True])
+def test_media_pipeline_with_real_ffmpeg(db, seed, tmp_path, monkeypatch, with_cookies):
     """Only YouTube transport is simulated; MP4/audio processing uses real FFmpeg."""
     from app import media
+    cookie_source = tmp_path / "supplied.cookies.txt"
+    cookie_text = "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t2147483647\tSID\tfixture-cookie-secret\n"
+    if with_cookies:
+        cookie_source.write_text(cookie_text, encoding="utf-8")
+        db.settings = replace(db.settings, youtube_cookies_file=str(cookie_source))
+    cookie_paths = []
     video_id = seed()
     fixture = tmp_path / "fixture.mp4"
     subprocess.run(["ffmpeg", "-nostdin", "-y", "-f", "lavfi", "-i", "color=c=blue:s=160x90:d=2",
@@ -50,6 +59,13 @@ def test_media_pipeline_with_real_ffmpeg(db, seed, tmp_path, monkeypatch):
         directory = Path(directory)
         if "yt_dlp" not in command:
             return real_run(command, directory, pulse, timeout, *args)
+        if with_cookies:
+            cookie_path = Path(command[command.index("--cookies") + 1])
+            assert cookie_path.parent == directory and cookie_path != cookie_source
+            assert "fixture-cookie-secret" in cookie_path.read_text(encoding="utf-8")
+            cookie_paths.append(cookie_path)
+        else:
+            assert "--cookies" not in command
         if "--write-info-json" in command:
             (directory / "source.info.json").write_text(json.dumps({
                 "title": "Transport fixture", "duration": 2,
@@ -72,6 +88,80 @@ def test_media_pipeline_with_real_ffmpeg(db, seed, tmp_path, monkeypatch):
                                check=True, capture_output=True, timeout=30)
         assert 1.8 < float(json.loads(probe.stdout)["format"]["duration"]) < 2.5
     assert transcript["segments"][0]["text"] == "Test speech"
+    if with_cookies:
+        assert len(cookie_paths) == 3 and len(set(cookie_paths)) == 1
+        assert not cookie_paths[0].exists()
+        assert cookie_source.read_text(encoding="utf-8") == cookie_text
+        assert not list((db.settings.data_dir / "media").rglob("*cookies*"))
+        assert "fixture-cookie-secret" not in json.dumps((result, updates, transcript))
+
+
+def test_cookies_are_filtered_and_source_is_not_modified(settings, tmp_path):
+    source = tmp_path / "browser.cookies.txt"
+    original = ("# Netscape HTTP Cookie File\n"
+                ".youtube.com\tTRUE\t/\tTRUE\t2147483647\tSID\tyoutube-secret\n"
+                ".example.com\tTRUE\t/\tTRUE\t2147483647\tSESSION\tother-site-secret\n")
+    source.write_text(original, encoding="utf-8")
+    work = tmp_path / "work"
+    work.mkdir()
+    command = youtube_command(replace(settings, youtube_cookies_file=str(source)), work)
+    private = Path(command[command.index("--cookies")+1])
+    jar = MozillaCookieJar(str(private))
+    jar.load(ignore_discard=True, ignore_expires=True)
+    assert [(cookie.domain, cookie.value) for cookie in jar] == [(".youtube.com", "youtube-secret")]
+    assert "other-site-secret" not in private.read_text(encoding="utf-8")
+    private.write_text("updated session", encoding="utf-8")
+    assert source.read_text(encoding="utf-8") == original
+    if sys.platform != "win32":
+        assert private.stat().st_mode & 0o777 == 0o600
+
+
+def test_cancelled_attempt_cookies_are_removed_without_touching_a_new_owner(db, tmp_path):
+    from app.worker import cleanup_cookie_files
+    work = db.settings.data_dir / "work"
+    old = work / "job-id-1-old" / ".youtube-cookies.txt"
+    current = work / "job-id-2-current" / ".youtube-cookies.txt"
+    other = work / "other-job-1-current" / ".youtube-cookies.txt"
+    source = tmp_path / "supplied.cookies.txt"
+    for path in (old, current, other, source):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("credential", encoding="utf-8")
+    cleanup_cookie_files(db, {"id": "job-id", "attempts": 1})
+    assert not old.exists()
+    assert all(path.read_text(encoding="utf-8") == "credential" for path in (current, other, source))
+
+
+@pytest.mark.parametrize("content", [None, "invalid-cookie-secret", "# Netscape HTTP Cookie File\n",
+    "# Netscape HTTP Cookie File\n.example.com\tTRUE\t/\tTRUE\t2147483647\tSESSION\tother-site-secret\n"])
+def test_cookie_configuration_errors_are_safe_and_not_retried(settings, tmp_path, content):
+    source = tmp_path / "private-credentials.txt"
+    if content is not None:
+        source.write_text(content, encoding="utf-8")
+    with pytest.raises(MediaError) as error:
+        youtube_command(replace(settings, youtube_cookies_file=str(source)), tmp_path)
+    assert error.value.retry is False
+    assert "EARSPACE_YOUTUBE_COOKIES_FILE" in str(error.value)
+    assert str(source) not in str(error.value)
+    assert "other-site-secret" not in str(error.value)
+    assert "invalid-cookie-secret" not in str(error.value)
+
+
+def test_login_errors_fail_once_without_leaking_provider_output(db, seed, tmp_path, monkeypatch):
+    from app import runner
+    code = "import sys; print('ERROR: Sign in to confirm you are not a bot; secret=value'); sys.exit(1)"
+    with pytest.raises(MediaError) as error:
+        run_command([sys.executable, "-c", code], tmp_path, lambda *_: None, 10)
+    assert error.value.retry is False
+    assert "secret=value" not in str(error.value)
+    def login_required(*args):
+        raise error.value
+    monkeypatch.setattr(runner, "download", login_required)
+    enqueue(db, "download", seed(), {"mode": "audio"})
+    job = claim(db, "login-test")
+    runner.execute(db, job, "login-test")
+    with db.connect() as connection:
+        row = connection.execute("SELECT status, attempts FROM jobs WHERE id=?", (job["id"],)).fetchone()
+    assert dict(row) == {"status": "failed", "attempts": 1}
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg") or not shutil.which("ffprobe"), reason="Requires FFmpeg")

@@ -8,7 +8,7 @@ from app.main import create_app
 @pytest.fixture
 def settings(tmp_path):
     return Settings(data_dir=tmp_path, api_key="test-secret-" + "a" * 32, youtube_key="",
-                    cors_origins=("http://localhost:5173",), min_free_mb=0)
+                    youtube_cookies_file="", cors_origins=("http://localhost:5173",), min_free_mb=0)
 
 
 @pytest.fixture

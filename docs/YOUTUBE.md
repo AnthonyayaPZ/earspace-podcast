@@ -65,7 +65,7 @@ JOB_ID=上一步返回的任务id
 curl --fail-with-body "$BASE/api/v1/jobs/$JOB_ID" -H "Authorization: Bearer $API_KEY"
 ```
 
-任务状态为 `queued → running → succeeded`；失败会先按配置重试，最终为 failed。部分内容发现失败但仍发现了内容时，任务可成功并在 `result.warnings` 中说明。没有 Worker 就不会处理任务。
+任务状态为 `queued → running → succeeded`；一般失败先按配置重试，最终为 failed。明确的登录验证和 Cookie 配置错误直接失败，更新配置后手动重试。部分内容发现失败但仍发现了内容时，任务可成功并在 `result.warnings` 中说明。没有 Worker 就不会处理任务。
 
 成功后读取推荐，language 使用 `zh` 或 `en`：
 
@@ -131,11 +131,46 @@ curl --fail-with-body -X PUT "$BASE/api/v1/episodes/$VIDEO_ID/feedback" \
 
 `reaction` 还支持 `dislike`；`difficulty` 支持 `too_easy`、`just_right`、`too_hard`。这些反馈保存在本应用，不会给 YouTube 点赞或发送评论。
 
-## 六、排错与边界
+## 六、YouTube 登录验证与 Cookie 文件
+
+如果推荐检索成功，但下载报告 `Sign in to confirm you're not a bot`，需要分别检查下载进程的网络访问和登录会话。Google API Key 不用于媒体下载。浏览器能播放，不代表后台下载进程已经使用同一个登录会话或网络出口。
+
+1. 在自己的浏览器打开同一个视频；若要求登录或验证，先在浏览器完成。
+2. 按 [yt-dlp 官方 YouTube Cookie 导出说明](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies)，导出 `youtube.com` 域名 Cookie，格式为 Netscape Cookie 文件。浏览器导出工具可参考其 [官方 FAQ](https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp)。官方建议从独立的隐私窗口登录，导出后关闭该窗口，避免会话持续轮换。不要使用同时导出所有网站 Cookie 的命令。
+3. 本机建议保存为项目目录下的 `secrets/youtube.cookies.txt`；Cookie 是登录凭据，留在自己的设备，不放进聊天或 GitHub。`secrets/` 和 `*.cookies.txt` 已被 Git、Docker 构建上下文及源码发行包排除。
+4. 在 `.env` 设置路径；空值保持匿名下载：
+
+```dotenv
+EARSPACE_YOUTUBE_COOKIES_FILE=./secrets/youtube.cookies.txt
+```
+
+重启本地 API 和 Worker，然后在网页手动重试失败的下载任务。系统将文件中的 YouTube 域名 Cookie 复制到每次任务的私有工作目录；信息读取、音轨和字幕下载共用此临时副本。源文件可以只读，yt-dlp 更新会话不会改写源文件；Cookie 不会进入任务返回值或已发布的媒体目录，临时副本随任务工作目录清理。
+
+`/api/v1/status` 的 `youtube_cookies_configured` 仅表示已配置路径，不检查 Cookie 是否有效，也不返回路径或内容。读取不到文件、格式不正确或文件中没有 YouTube Cookie 时，下载任务直接失败，并返回不含凭据的配置提示。
+
+### Docker 使用 Cookie
+
+Cookie 通过只读文件挂载提供给 Worker，不打包进镜像。`.env` 中设置服务器宿主机上的**绝对路径**，例如：
+
+```dotenv
+EARSPACE_YOUTUBE_COOKIES_FILE=/home/you/earspace-podcast/secrets/youtube.cookies.txt
+```
+
+确保文件存在且容器 UID 10001 可读；Linux 上可按实际路径执行 `sudo chown 10001:10001 secrets/youtube.cookies.txt` 和 `sudo chmod 600 secrets/youtube.cookies.txt`。使用附带的覆盖文件启动：
+
+```bash
+docker compose -f compose.yaml -f compose.cookies.yaml up -d --build --wait --wait-timeout 180
+```
+
+覆盖文件只将 Cookie 挂载给 Worker，并将其容器内配置改为 `/run/secrets/youtube.cookies.txt`。后续更新或重新创建容器时，继续使用这两个 `-f` 参数。
+
+有效 Cookie 不保证所有视频或服务器出口都能下载。若仍失败，检查会话是否过期、浏览器与 Worker 是否使用相同网络出口，再根据具体错误诊断。部分客户端还需要 PO Token；这是另一项要求，当前项目未内置 Token Provider，参考 [yt-dlp PO Token 指南](https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide)。不要在明确的登录错误下持续自动重试。
+
+## 七、排错与边界
 
 - Google 密钥配置只决定公开内容检索能否使用；yt-dlp 获取音轨不依赖该密钥。
 - 网络能访问 Google API，不代表服务器 IP 一定能下载 YouTube 媒体；反过来也一样。
 - Google 配额、密钥限制和 API 启用状态会影响发现；YouTube 的登录要求、IP 限制、地区限制和平台变化会影响音轨下载。
-- 当前版本不读取浏览器 Cookie，不自动绕过验证码／登录，也不保证所有公开视频都能下载。
+- 默认不读取浏览器 Cookie；仅使用你通过 `EARSPACE_YOUTUBE_COOKIES_FILE` 显式指定的 Cookie 文件，不自动完成验证码／登录，也不保证所有公开视频都能下载。
 - yt-dlp 需要维护更新；依赖锁定在 uv.lock，可用 `uv lock --upgrade-package yt-dlp` 更新，测试后重建镜像。不要关闭 TLS 验证来处理网络错误。
 - 只下载、保存、转写自己有权处理的内容。项目的音轨格式选择和工具参数参考 [yt-dlp 官方文档](https://github.com/yt-dlp/yt-dlp#format-selection)。

@@ -6,12 +6,13 @@ root = Path(__file__).resolve().parent.parent
 output = root / "artifacts" / "earspace-server.zip"
 output.parent.mkdir(exist_ok=True)
 files = [root / name for name in (".env.example", ".gitignore", ".gitattributes", ".dockerignore", "Dockerfile",
-                                 "compose.yaml", "pyproject.toml", "uv.lock", ".python-version", "README.md")]
+                                 "compose.yaml", "compose.cookies.yaml", "pyproject.toml", "uv.lock", ".python-version", "README.md")]
 for directory in ("app", "scripts", "deploy", "tests", "docs", ".github"):
     path = root / directory
     if path.is_dir():
         files.extend(p for p in path.rglob("*") if p.is_file() and not p.is_symlink()
-                     and "__pycache__" not in p.parts and p.suffix != ".pyc")
+                     and "__pycache__" not in p.parts and "secrets" not in p.parts and p.suffix != ".pyc"
+                     and not p.match("cookies*.txt") and not p.match("*.cookies.txt"))
 with ZipFile(output, "w", ZIP_DEFLATED) as archive:
     for file in sorted(set(files)):
         archive.write(file, file.relative_to(root).as_posix())

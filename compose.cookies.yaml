@@ -1,0 +1,13 @@
+# Optional: docker compose -f compose.yaml -f compose.cookies.yaml up -d --build
+# EARSPACE_YOUTUBE_COOKIES_FILE must be an existing absolute path on the host.
+services:
+  worker:
+    environment:
+      EARSPACE_YOUTUBE_COOKIES_FILE: /run/secrets/youtube.cookies.txt
+    volumes:
+      - type: bind
+        source: ${EARSPACE_YOUTUBE_COOKIES_FILE:?Set EARSPACE_YOUTUBE_COOKIES_FILE to the host cookie file}
+        target: /run/secrets/youtube.cookies.txt
+        read_only: true
+        bind:
+          create_host_path: false

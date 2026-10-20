@@ -62,6 +62,7 @@ Google API 负责公开内容检索与元数据；推荐在本应用中排序；
 - 中英文分区、待听列表、继续收听、倍速、睡眠定时、逐句循环。
 - 默认 `mode=audio` 获取独立音轨；AAC 直接复制为 M4A，保留原码率，其他编码才单线程转换为 AAC 96 kbps；`mode=video` 额外准备 MP4。
 - 相应语言人工字幕优先，其次自动字幕；支持时间戳 JSON 导入和 VTT／TXT 导出。
+- 遇到 YouTube 登录验证时，可选配置自行导出的 Cookie 文件；源文件不被修改，临时副本只保留 YouTube Cookie。
 - 可选 faster-whisper CPU 转写，不因缺字幕而自动运行。
 - SQLite 持久化任务，去重、退避重试、取消、Worker 租约恢复、媒体任务互斥。
 - Bearer 鉴权、Range 媒体播放、短期签名播放链接、来源明确的 CORS。
@@ -81,7 +82,7 @@ Google API 负责公开内容检索与元数据；推荐在本应用中排序；
 
 尚未实现多账户、YouTube 账号同步、自动定时发现、全文翻译、AI 摘要、口语评分与手机离线 App。手机网页后台播放由浏览器决定；可下载 M4A 后使用设备播放器。
 
-只处理你有权下载、保存和转写的内容。服务器 IP、地区限制、登录要求或 YouTube 变动可能影响下载；当前不读取 Cookie、不自动绕过访问验证。
+只处理你有权下载、保存和转写的内容。服务器 IP、地区限制、登录要求或 YouTube 变动可能影响下载。默认匿名获取；可通过 `EARSPACE_YOUTUBE_COOKIES_FILE` 指定自行导出的登录会话，不自动读取浏览器会话或完成验证码。配置方式见 [登录验证排错](docs/YOUTUBE.md#六youtube-登录验证与-cookie-文件)。
 
 项目不会提交 `.env`、数据库、Cookie、媒体文件或虚拟环境。运行数据保存在 Docker 命名卷；`docker compose down` 保留数据，避免误用 `down -v`。
 

@@ -5,6 +5,8 @@
 *.key
 *.sqlite3*
 cookies*.txt
+*.cookies.txt
+secrets/
 .venv/
 __pycache__/
 .pytest_cache/

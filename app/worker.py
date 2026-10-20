@@ -36,6 +36,17 @@ def kill_tree(process):
     process.wait(timeout=10)
 
 
+def cleanup_cookie_files(db, job):
+    """Remove credentials left by an abruptly stopped attempt, without touching other leases."""
+    work_root = (db.settings.data_dir / "work").resolve()
+    for path in work_root.glob(f"{job['id']}-{job['attempts']}-*/.youtube-cookies.txt"):
+        try:
+            if path.parent.parent.resolve() == work_root and path.resolve().is_relative_to(work_root):
+                path.unlink(missing_ok=True)
+        except OSError:
+            log.error("任务 Cookie 临时文件清理失败，请检查工作目录权限")
+
+
 def consume(db, job, owner, stop):
     # Isolate model loading and third-party tools so cancellation/timeout can stop them too.
     env = os.environ.copy()
@@ -60,8 +71,11 @@ def consume(db, job, owner, stop):
     except LostLease:
         log.info("Job %s cancelled or lease lost", job["id"])
     finally:
-        if process.poll() is None:
-            kill_tree(process)
+        try:
+            if process.poll() is None:
+                kill_tree(process)
+        finally:
+            cleanup_cookie_files(db, job)
 
 
 def main():
