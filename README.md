@@ -62,6 +62,7 @@ Google API 负责公开内容检索与元数据；推荐在本应用中排序；
 - 中英文分区、待听列表、继续收听、倍速、睡眠定时、逐句循环。
 - 默认 `mode=audio` 获取独立音轨；AAC 直接复制为 M4A，保留原码率，其他编码才单线程转换为 AAC 96 kbps；`mode=video` 额外准备 MP4。
 - 相应语言人工字幕优先，其次自动字幕；支持时间戳 JSON 导入和 VTT／TXT 导出。
+- 自动按句整理字幕，跨片段合并／句中拆分；高亮、跳转与循环共用句子边界。旧文稿可直接“重新整理”，保留原始字幕，无需重新下载音频。
 - 遇到 YouTube 登录验证时，可选配置自行导出的 Cookie 文件；源文件不被修改，临时副本只保留 YouTube Cookie。
 - 可选 faster-whisper CPU 转写，不因缺字幕而自动运行。
 - SQLite 持久化任务，去重、退避重试、取消、Worker 租约恢复、媒体任务互斥。
@@ -74,6 +75,7 @@ Google API 负责公开内容检索与元数据；推荐在本应用中排序；
 | [服务器部署](docs/DEPLOYMENT.md) | 克隆、配置、Docker、SSH 访问、HTTPS、运维与排错 |
 | [YouTube 接入](docs/YOUTUBE.md) | API Key、内容发现、推荐原理、仅音频下载、网络边界 |
 | [API 参考](docs/API.md) | 接口、鉴权、反馈与文稿格式 |
+| [句子与循环](docs/TRANSCRIPTS.md) | 断句算法、时间精度、同步循环与旧文稿重建 |
 | [开发与架构](docs/DEVELOPMENT.md) | 本机启动、任务结构、测试、依赖与发行包 |
 
 ## 当前边界

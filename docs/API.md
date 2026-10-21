@@ -43,8 +43,9 @@ curl -X POST "$BASE/api/v1/episodes/import" \
 | `GET/PUT/DELETE /api/v1/episodes/{id}/feedback` | 喜好和难度反馈、重置 |
 | `GET/PUT /api/v1/episodes/{id}/progress` | 续播，position 为秒 |
 | `GET /api/v1/listening/continue` | 最近未完成收听 |
-| `GET/PUT /api/v1/episodes/{id}/transcript` | 获取／导入时间戳文稿 |
-| `GET /api/v1/episodes/{id}/transcript/export?format=vtt` | 导出 VTT 或 TXT |
+| `GET/PUT /api/v1/episodes/{id}/transcript` | 默认获取句子文稿／导入原始时间戳文稿；`?view=raw` 获取原始片段 |
+| `POST /api/v1/episodes/{id}/transcript/rebuild` | 从已存原始片段重建句子，不下载媒体、不调用语音 API |
+| `GET /api/v1/episodes/{id}/transcript/export?format=vtt` | 导出句子 VTT 或 TXT；`view=raw` 可导出原始片段 |
 | `GET /api/v1/episodes/{id}/media/audio` | 带 Bearer 鉴权的音频，支持 Range 和 HEAD |
 | `GET /api/v1/episodes/{id}/media/video?download=true` | MP4 下载 |
 | `POST /api/v1/episodes/{id}/playback-token?kind=audio` | 获取可用于 HTML audio/video 的短期地址 |
@@ -70,3 +71,9 @@ curl -X POST "$BASE/api/v1/episodes/import" \
 ```
 
 按开始时间排序，结束时间必须晚于开始时间。网页“导入文稿”接收此 JSON。媒体任务运行时暂不接受手动文稿写入，避免覆盖冲突。
+
+文稿读取默认返回整理后的 `segments`，每段保留 `start/end/text`，另有 `kind`（`sentence` 或 `fragment`）、`boundary`（`punctuation/manual/pause/length/end`）和 `timing`（`estimated/caption_words`）。未加标点的手动导入片段尊重导入者的分段，记为 `manual`；它不代表算法验证了语法完整性。`processing` 包含算法 `version`、`raw_count`、`sentence_count`（所有句子／语段总数）、`fragment_count`、`timing`（另可能为 `mixed`）、`invalid_cues` 和 `rolling_revisions`。
+
+`POST .../transcript/rebuild` 返回同样的数据，外加 `changed`：源文稿、语言、节目时长或算法版本相较缓存是否变化。重复重建不会累加切分或改写原文。没有原始文稿时返回 404。新下载／转写／导入自动使旧缓存失效，首次读取生成新句子视图。重建可与媒体任务并发；发布和重建在 SQLite 事务中串行，避免把旧版本缓存覆盖到新来源上。
+
+旧字幕通常只保存片段时间：句中拆分依照字数比例估算，并不进行音频强制对齐。新下载的 JSON3 如有词级偏移则保留并优先使用；`caption_words` 仍是字幕时间，不保证与音频采样精确对齐。缺失字幕时重建不会凭空生成文字，仍需手动导入或另行启用语音识别。算法细节见 [句子与循环设计](TRANSCRIPTS.md)。

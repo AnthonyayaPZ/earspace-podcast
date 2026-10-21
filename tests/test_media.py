@@ -14,7 +14,7 @@ from app.media import MediaError, download, run_command, youtube_command
 from app.transcripts import parse_json3
 
 
-def test_json3_duplicate_cues(tmp_path):
+def test_json3_preserves_source_and_repeated_speech(tmp_path):
     path = tmp_path / "caption.json3"
     path.write_text(json.dumps({"events": [
         {"tStartMs": 0, "dDurationMs": 1000, "segs": [{"utf8": "Hello &amp; world"}]},
@@ -22,8 +22,9 @@ def test_json3_duplicate_cues(tmp_path):
         {"tStartMs": 2000, "dDurationMs": 1000, "segs": [{"utf8": "Next sentence"}]},
         {"tStartMs": 3000, "segs": [{"utf8": "\n"}]}]}), encoding="utf-8")
     result = parse_json3(path)
-    assert len(result) == 2
-    assert result[0] == {"start": 0, "end": 2, "text": "Hello & world"}
+    assert len(result) == 3
+    assert result[0] == {"start": 0, "end": 1, "text": "Hello & world"}
+    assert result[1]["text"] == result[0]["text"]  # A repeated utterance is not a rolling revision.
 
 
 def test_subprocess_timeout_and_cancellation(tmp_path):

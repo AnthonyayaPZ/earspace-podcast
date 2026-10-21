@@ -18,7 +18,7 @@ from .db import Database, public_episode
 from .jobs import QueueConflict, cancel, enqueue, public_job
 from .models import FeedbackRequest, ImportRequest, Language, Profile, ProgressRequest, TranscriptRequest, youtube_id
 from .recommend import recommendations, speech_estimate
-from .transcripts import vtt
+from .transcripts import read_transcript, save_transcript, vtt
 
 security = HTTPBearer(auto_error=False)
 
@@ -285,30 +285,31 @@ def create_app(settings=None):
             if c.execute("SELECT 1 FROM jobs WHERE episode_id=? AND kind IN ('download','transcribe') AND status IN ('queued','running')",
                          (video_id,)).fetchone():
                 raise HTTPException(409, "请等待媒体任务完成或取消后再导入文稿")
-            c.execute("INSERT OR REPLACE INTO transcripts VALUES (?,?,?,?)",
-                      (video_id, json.dumps([s.model_dump() for s in body.segments], ensure_ascii=False), "manual", body.language))
+            save_transcript(c, video_id, {"segments": [s.model_dump() for s in body.segments], "source": "manual", "language": body.language})
             c.execute("UPDATE episodes SET transcript_source='manual',transcript_warning=NULL WHERE id=?", (video_id,))
         return {"source": "manual", "segments": len(body.segments)}
 
-    def transcript_data(video_id):
+    def transcript_data(video_id, **options):
         require_episode(video_id)
-        with db.connect() as c:
-            row = c.execute("SELECT * FROM transcripts WHERE episode_id=?", (video_id,)).fetchone()
-        if not row:
+        result = read_transcript(db, video_id, **options)
+        if result is None:
             raise HTTPException(404, "文稿尚未生成，可导入文稿或启动转写")
-        return {"episode_id": video_id, "language": row["language"], "source": row["source"],
-                "segments": json.loads(row["segments"])}
+        return result
 
     @app.get("/api/v1/episodes/{video_id}/transcript", dependencies=protected, tags=["transcripts"])
-    def get_transcript(video_id: str):
-        result = transcript_data(video_id)
+    def get_transcript(video_id: str, view: Literal["sentences", "raw"] = "sentences"):
+        result = transcript_data(video_id, view=view)
         if result["language"] == "en":
             result["difficulty"] = speech_estimate(result["segments"])
         return result
 
+    @app.post("/api/v1/episodes/{video_id}/transcript/rebuild", dependencies=protected, tags=["transcripts"])
+    def rebuild_transcript(video_id: str):
+        return transcript_data(video_id, rebuild=True)
+
     @app.get("/api/v1/episodes/{video_id}/transcript/export", dependencies=protected, tags=["transcripts"])
-    def export_transcript(video_id: str, format: Literal["vtt", "txt"] = "vtt"):
-        data = transcript_data(video_id)
+    def export_transcript(video_id: str, format: Literal["vtt", "txt"] = "vtt", view: Literal["sentences", "raw"] = "sentences"):
+        data = transcript_data(video_id, view=view)
         content = vtt(data["segments"]) if format == "vtt" else "\n".join(s["text"] for s in data["segments"])
         return PlainTextResponse(content, media_type="text/vtt" if format == "vtt" else "text/plain",
                                  headers={"Content-Disposition": f'attachment; filename="{video_id}.{format}"'})

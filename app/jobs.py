@@ -2,6 +2,8 @@ import json
 import time
 import uuid
 
+from .transcripts import save_transcript
+
 
 class LostLease(Exception):
     pass
@@ -99,9 +101,7 @@ def finish(db, job, owner, result, episode_updates=None, transcript=None):
                 c.execute("UPDATE episodes SET " + ",".join(f"{k}=?" for k in values) + ",updated_at=? WHERE id=?",
                           (*values.values(), now, job["episode_id"]))
         if transcript:
-            c.execute("INSERT OR REPLACE INTO transcripts VALUES (?,?,?,?)",
-                      (job["episode_id"], json.dumps(transcript["segments"], ensure_ascii=False),
-                       transcript["source"], transcript["language"]))
+            save_transcript(c, job["episode_id"], transcript)
 
 
 def cancel(db, job_id):

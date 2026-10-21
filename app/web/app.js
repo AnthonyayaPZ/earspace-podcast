@@ -2,7 +2,7 @@
 const $ = selector => document.querySelector(selector);
 const state = {key: sessionStorage.getItem('earspace-key') || '', view: 'discover', language: 'zh',
   context: 'gym', offset: 0, limit: 12, connected: false, episode: null, segments: [],
-  loopIndex: -1, lastSave: 0, loadId: 0, renderId: 0, sleepTimer: null, activeJobs: 0};
+  lastSave: 0, loadId: 0, renderId: 0, transcriptId: 0, sleepTimer: null, activeJobs: 0};
 let toastTimer;
 
 function h(tag, attrs = {}, ...children) {
@@ -194,11 +194,12 @@ async function pollJobs() {
 }
 const audio = $('#audio'), video = $('#video');
 const activeMedia = () => $('#video-dialog').open ? video : audio;
+const sentencePlayer = new EarspacePlayback.SentenceLoop(activeMedia);
 async function saveProgress(completed = false) {
   if (!state.episode || !state.connected || state.suppressMediaEvents || !Number.isFinite(activeMedia().currentTime)) return;
   state.lastSave = Date.now();
   await api(`/episodes/${state.episode.id}/progress`, {method: 'PUT', body: JSON.stringify({position: activeMedia().currentTime,
-    completed: completed || activeMedia().ended, playback_rate: activeMedia().playbackRate})});
+    completed: completed || (activeMedia().ended && !sentencePlayer.looping), playback_rate: activeMedia().playbackRate})});
 }
 async function playEpisode(item) {
   const requestId = ++state.loadId;
@@ -206,7 +207,7 @@ async function playEpisode(item) {
   const [token, progress] = await Promise.all([api(`/episodes/${item.id}/playback-token?kind=audio`, {method: 'POST'}), api(`/episodes/${item.id}/progress`)]);
   if (requestId !== state.loadId) return;
   state.suppressMediaEvents = true;
-  audio.pause(); state.episode = item; state.segments = []; state.loopIndex = -1;
+  audio.pause(); state.episode = item; state.segments = []; sentencePlayer.reset(); $('#sentence-loop').checked = false;
   $('#player').hidden = false; $('#player-title').textContent = item.title; $('#player-channel').textContent = item.channel_title;
   $('#video-btn').hidden = !item.video_available;
   $('#speed').value = progress.playback_rate; audio.playbackRate = progress.playback_rate;
@@ -227,38 +228,46 @@ async function loadTranscript() {
   if (!state.episode) return;
   $('#transcript-panel').hidden = false; $('#transcript-source').textContent = '正在获取文稿…'; $('#transcript-lines').replaceChildren();
   const episodeId = state.episode.id;
+  const requestId = ++state.transcriptId;
   try {
     const data = await api(`/episodes/${episodeId}/transcript`);
-    if (state.episode?.id !== episodeId) return;
+    if (state.episode?.id !== episodeId || requestId !== state.transcriptId) return;
     state.segments = data.segments;
+    sentencePlayer.setSegments(data.segments);
     const names = {manual: '手动导入', youtube_manual: 'YouTube 人工字幕', youtube_auto: 'YouTube 自动字幕', whisper: 'Whisper 语音转写'};
-    $('#transcript-source').textContent = `来源：${names[data.source] || data.source} · ${data.segments.length} 句。点击句子跳转播放。`;
+    const processing = data.processing || {};
+    const fragments = processing.fragment_count ? `（含 ${processing.fragment_count} 个未完整断句的语段）` : '';
+    const timing = processing.timing === 'caption_words' ? '采用字幕词级时间。' : '部分句子边界按字幕时间估算，循环可能有少量偏差。';
+    $('#transcript-source').textContent = `来源：${names[data.source] || data.source} · ${data.segments.length} 句 / 语段${fragments}。原始 ${processing.raw_count ?? data.segments.length} 条字幕已保留。${timing}点击句子跳转播放。`;
     $('#transcript-lines').replaceChildren(...data.segments.map((segment, i) => h('button', {class: 'transcript-line', 'data-index': i,
-      onclick: () => { state.loopIndex = i; activeMedia().currentTime = segment.start; activeMedia().play().catch(() => {}); }},
+      'data-fragment': segment.kind === 'fragment' ? 'true' : undefined, title: segment.kind === 'fragment' ? '原字幕缺少可靠句末标点，此处按停顿或长度分段' : undefined,
+      onclick: () => { sentencePlayer.select(i); syncTranscript(); }},
       h('small', {}, duration(segment.start)), h('span', {}, segment.text))));
+    syncTranscript();
     if (state.episode.language === 'en') {
       $('#transcript-lines').append(h('div', {class: 'tags'}, ['too_easy', 'just_right', 'too_hard'].map((value, i) => h('button', {
         class: 'button secondary', onclick: safe(() => feedback(episodeId, 'difficulty', value))}, ['太简单', '刚刚好', '太难了'][i]))));
     }
   } catch (error) {
+    if (state.episode?.id !== episodeId || requestId !== state.transcriptId) return;
     if (error.status !== 404) throw error;
-    state.segments = []; $('#transcript-source').textContent = '这段内容还没有文稿。你可以导入带时间戳的 JSON 文稿，或在服务开启转写后从音频生成。';
+    state.segments = []; sentencePlayer.setSegments([]); $('#transcript-source').textContent = '这段内容还没有文稿。你可以导入带时间戳的 JSON 文稿，或在服务开启转写后从音频生成。';
   }
 }
 function syncTranscript() {
   const media = activeMedia();
-  const loop = state.segments[state.loopIndex];
-  if ($('#sentence-loop').checked && loop && media.currentTime >= loop.end) { media.currentTime = loop.start; return; }
   if (!state.segments.length || $('#transcript-panel').hidden) return;
-  let low = 0, high = state.segments.length - 1, index = -1;
-  while (low <= high) { const mid = (low + high) >> 1; if (state.segments[mid].start <= media.currentTime) {index = mid; low = mid + 1;} else high = mid - 1; }
+  const index = EarspacePlayback.indexAt(state.segments, media.currentTime);
   const old = $('#transcript-lines .active'); const current = $(`#transcript-lines [data-index="${index}"]`);
   if (old !== current) { old?.classList.remove('active'); current?.classList.add('active'); }
 }
 for (const media of [audio, video]) {
-  media.addEventListener('timeupdate', () => { if (state.suppressMediaEvents) return; syncTranscript(); if (Date.now() - state.lastSave > 15000 && !media.paused) safe(saveProgress)(); });
+  for (const event of ['play', 'playing', 'pause', 'waiting', 'emptied', 'seeking', 'seeked', 'ratechange']) {
+    media.addEventListener(event, () => { sentencePlayer.handle(event, media); if (media === activeMedia()) syncTranscript(); });
+  }
+  media.addEventListener('timeupdate', () => { if (state.suppressMediaEvents || media !== activeMedia()) return; sentencePlayer.handle('timeupdate', media); syncTranscript(); if (Date.now() - state.lastSave > 15000 && !media.paused) safe(saveProgress)(); });
   media.addEventListener('pause', () => { if (media === activeMedia()) safe(() => saveProgress())(); });
-  media.addEventListener('ended', safe(async () => { await saveProgress(true); toast('这段收听完成，辛苦啦'); await render(); }));
+  media.addEventListener('ended', safe(async () => { if (media !== activeMedia() || sentencePlayer.handle('ended', media)) return; await saveProgress(true); toast('这段收听完成，辛苦啦'); await render(); }));
   media.addEventListener('error', () => { if (media.src) toast('媒体加载失败，请检查网络，或重新打开节目获取播放链接'); });
 }
 async function downloadMedia(id, kind = 'audio') {
@@ -288,6 +297,7 @@ $('#connect-form').onsubmit = async event => {
   finally { button.disabled = false; }
 };
 $('#disconnect').onclick = () => {
+  sentencePlayer.reset(); $('#sentence-loop').checked = false;
   state.key = ''; state.connected = false; sessionStorage.removeItem('earspace-key'); audio.pause(); video.pause();
   audio.removeAttribute('src'); audio.load(); video.removeAttribute('src'); video.load();
   $('#connection-dot').classList.remove('online'); $('#connect-dialog').close(); $('#api-key').value = '';
@@ -318,12 +328,22 @@ $('#sleep').onchange = () => {
   clearTimeout(state.sleepTimer); const minutes = Number($('#sleep').value);
   if (minutes) { state.sleepTimer = setTimeout(() => { audio.pause(); video.pause(); $('#sleep').value = '0'; toast('定时已到，休息一下吧'); }, minutes*60000); toast(`将在 ${minutes} 分钟后暂停播放`); }
 };
-$('#close-player').onclick = safe(async () => { await saveProgress(); audio.pause(); video.pause(); clearTimeout(state.sleepTimer); $('#sleep').value='0'; state.loadId++; state.episode = null; $('#player').hidden = true; $('#transcript-panel').hidden = true; });
+$('#close-player').onclick = safe(async () => { await saveProgress(); audio.pause(); video.pause(); sentencePlayer.reset(); $('#sentence-loop').checked = false; clearTimeout(state.sleepTimer); $('#sleep').value='0'; state.loadId++; state.episode = null; $('#player').hidden = true; $('#transcript-panel').hidden = true; });
 $('#transcript-btn').onclick = safe(loadTranscript);
 $('#close-transcript').onclick = () => { $('#transcript-panel').hidden = true; };
 $('#sentence-loop').onchange = () => {
-  if ($('#sentence-loop').checked && state.loopIndex < 0) toast('点击一句文稿，开始循环练习');
+  sentencePlayer.setEnabled($('#sentence-loop').checked);
+  if ($('#sentence-loop').checked && sentencePlayer.index < 0) toast('点击一句文稿，开始循环练习');
 };
+$('#rebuild-transcript').onclick = safe(async () => {
+  if (!state.episode) return;
+  const episodeId = state.episode.id, button = $('#rebuild-transcript');
+  button.disabled = true;
+  try {
+    await api(`/episodes/${episodeId}/transcript/rebuild`, {method: 'POST'});
+    if (state.episode?.id === episodeId) { await loadTranscript(); toast('已从原始字幕重新整理，音频无需下载'); }
+  } finally { button.disabled = false; }
+});
 $('#export-transcript').onclick = safe(async () => {
   if (!state.episode) return;
   const response = await api(`/episodes/${state.episode.id}/transcript/export?format=txt`, {raw: true});
@@ -357,7 +377,7 @@ window.addEventListener('pagehide', () => {
   if (!state.episode || !state.connected) return;
   fetch(`/api/v1/episodes/${state.episode.id}/progress`, {method: 'PUT', keepalive: true,
     headers: {'Authorization': 'Bearer ' + state.key, 'Content-Type': 'application/json'},
-    body: JSON.stringify({position: activeMedia().currentTime || 0, completed: activeMedia().ended, playback_rate: activeMedia().playbackRate})}).catch(() => {});
+    body: JSON.stringify({position: activeMedia().currentTime || 0, completed: activeMedia().ended && !sentencePlayer.looping, playback_rate: activeMedia().playbackRate})}).catch(() => {});
 });
 setInterval(() => { if (state.connected && !document.hidden) pollJobs().catch(() => {}); }, 5000);
 setInterval(() => { if (state.connected && !document.hidden) checkStatus().catch(() => {}); }, 30000);

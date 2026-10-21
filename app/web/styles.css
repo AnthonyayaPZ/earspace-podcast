@@ -9,3 +9,4 @@
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
 
 .channel:hover{color:var(--link)}
+.transcript-actions{flex-wrap:wrap;gap:8px 16px}.transcript-actions label,.transcript-actions button{white-space:nowrap}.transcript-line[data-fragment="true"]{border-left:2px solid #e8c48a}

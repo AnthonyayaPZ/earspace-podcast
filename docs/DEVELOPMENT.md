@@ -38,11 +38,12 @@ Linux、macOS 和 Windows PowerShell 使用相同的 uv 命令，无需手动激
 | `app/worker.py` | 队列轮询、任务子进程、心跳与超时控制 |
 | `app/runner.py` | 单个任务执行与结果提交 |
 | `app/media.py` | 音轨／MP4 下载、FFmpeg、字幕、可选 Whisper |
-| `app/transcripts.py` | YouTube JSON3 解析与 VTT 导出 |
+| `app/transcripts.py` | JSON3 原始字幕、版本化句子整理、重建缓存与 VTT 导出 |
+| `app/web/sentence-player.js` | 统一时间查询、单句循环计时与播放器事件处理 |
 | `app/maintenance.py` | 未引用媒体和工作目录的只读检查／显式清理 |
 | `app/web/` | 无构建的 HTML、CSS 与原生 JavaScript 网页 |
 
-SQLite 开启 WAL、外键与 busy timeout，schema 版本目前为 1。当前模式变化使用任务 payload，不修改已有数据库结构。后续结构调整需显式迁移；升级前备份数据。
+SQLite 开启 WAL、外键与 busy timeout，schema 版本目前为 1。本次兼容升级仅通过 `CREATE TABLE IF NOT EXISTS` 增加可丢弃的 `transcript_sentences` 缓存表，`transcripts` 的四列结构和原始 JSON 保持兼容，不执行原表覆写。升级前使用 SQLite backup API 或停服务后完整备份数据；不要仅复制运行中的主数据库而遗漏 WAL。后续破坏性结构调整需显式迁移。
 
 新下载请求默认音频模式。任务 payload 的 `mode` 值为 `audio` 或 `video`；没有该字段的旧任务恢复为视频模式以兼容历史行为。`public_job` 返回 `media_mode`，不暴露完整内部 payload 或租约 owner。
 
@@ -58,10 +59,12 @@ Worker 定期续租；120 秒没有有效心跳的运行任务会在下一次 cl
 uv sync --locked
 uv run --locked pytest -q
 node --check app/web/app.js
+node --check app/web/sentence-player.js
+node --test tests/sentence-player.test.cjs
 docker compose --env-file .env.example config --quiet
 ```
 
-测试使用临时数据库与模拟 YouTube 传输，验证鉴权、CORS、请求大小、URL 白名单、签名、Range、反馈排序、模式冲突、并发去重、租约恢复、旧 Worker 隔离、转写／下载互斥与文稿处理。媒体集成测试调用真实 FFmpeg／ffprobe 和合成媒体，验证 MP4、AAC 直接复制、Opus 转 AAC 与已有视频保留；AAC 复制前后的逐包 SHA-256 对比用于确认没有重新编码。
+测试使用临时数据库与模拟 YouTube 传输，验证鉴权、CORS、请求大小、URL 白名单、签名、Range、反馈排序、模式冲突、并发去重、租约恢复、旧 Worker 隔离、转写／下载互斥与文稿处理。句子测试覆盖中英文标点、缩写／小数、片段合并、句中拆分、重复发言保留、词级偏移、无标点降级、原文保留、重建幂等和并发缓存失效；Node 内建测试使用可控媒体时钟验证循环边界、倍速、拖动、缓冲、末句和音视频切换。媒体集成测试调用真实 FFmpeg／ffprobe 和合成媒体，验证 MP4、AAC 直接复制、Opus 转 AAC 与已有视频保留；AAC 复制前后的逐包 SHA-256 对比用于确认没有重新编码。
 
 缺少 FFmpeg／ffprobe 时对应测试跳过。真实 YouTube 搜索与下载、服务器 IP 限制、可选 Whisper 的模型下载与效果需要在部署环境验收。可选转写并未包含模型性能基准。
 

@@ -39,6 +39,8 @@ jobs:
       - name: Check browser JavaScript and Compose
         run: |
           node --check app/web/app.js
+          node --check app/web/sentence-player.js
+          node --test tests/sentence-player.test.cjs
           uv run --locked scripts/init_env.py
           docker compose config --quiet
       - name: Build and launch container services

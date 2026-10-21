@@ -29,6 +29,11 @@ CREATE TABLE IF NOT EXISTS transcripts (
  episode_id TEXT PRIMARY KEY REFERENCES episodes(id), segments TEXT NOT NULL,
  source TEXT NOT NULL, language TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS transcript_sentences (
+ episode_id TEXT PRIMARY KEY REFERENCES episodes(id) ON DELETE CASCADE,
+ fingerprint TEXT NOT NULL, segments TEXT NOT NULL, metadata TEXT NOT NULL,
+ built_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS feedback (
  episode_id TEXT NOT NULL REFERENCES episodes(id), kind TEXT NOT NULL,
  value TEXT NOT NULL, updated_at REAL NOT NULL, PRIMARY KEY(episode_id,kind)
