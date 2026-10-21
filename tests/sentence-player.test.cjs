@@ -1,7 +1,37 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
 const {indexAt, SentenceLoop} = require('../app/web/sentence-player.js');
 const segments = [{start: 1, end: 3}, {start: 3, end: 5}, {start: 7, end: 10}];
+
+test('browser timers retain their Window receiver on player reset and loop scheduling', () => {
+  // Node timers accept an arbitrary receiver; browser Web IDL timers do not.
+  const page = vm.createContext({});
+  vm.runInContext(`
+    var scheduled = 0, cleared = 0;
+    globalThis.setTimeout = function(callback, delay) {
+      if (this !== globalThis) throw new TypeError('Illegal invocation');
+      scheduled++; return scheduled;
+    };
+    globalThis.clearTimeout = function(id) {
+      if (this !== globalThis) throw new TypeError('Illegal invocation');
+      cleared++;
+    };
+  `, page);
+  vm.runInContext(fs.readFileSync(require.resolve('../app/web/sentence-player.js'), 'utf8'), page);
+  vm.runInContext(`
+    var media = {currentTime: 1, paused: false, playbackRate: 1, seeking: false};
+    var player = new EarspacePlayback.SentenceLoop(() => media);
+    player.reset();
+    player.setSegments([{start: 1, end: 3}]);
+    player.setEnabled(true);
+    media.paused = true; player.handle('pause', media);
+    player.reset();
+  `, page);
+  assert.equal(page.scheduled, 1);
+  assert.ok(page.cleared >= 4);
+});
 
 function fixture() {
   const audio = {currentTime: 1, playbackRate: 1, paused: false, seeking: false,

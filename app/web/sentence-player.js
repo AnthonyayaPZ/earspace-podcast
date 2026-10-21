@@ -12,7 +12,9 @@
   }
 
   class SentenceLoop {
-    constructor(getMedia, {setTimer = setTimeout, clearTimer = clearTimeout} = {}) {
+    // Browser timer methods require Window as their receiver, even when stored on this controller.
+    constructor(getMedia, {setTimer = (callback, delay) => root.setTimeout(callback, delay),
+      clearTimer = id => root.clearTimeout(id)} = {}) {
       this.getMedia = getMedia; this.setTimer = setTimer; this.clearTimer = clearTimer;
       this.segments = []; this.index = -1; this.enabled = false; this.timer = null; this.pendingSeek = null; this.buffering = false;
     }
